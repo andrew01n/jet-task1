@@ -1,192 +1,187 @@
-const { db } = require('../db');
-const { shopItems, shopItemsToCategories, shopItemCategories } = require('../db/schema');
-const { eq, inArray } = require('drizzle-orm');
+import { db } from '../db/index.js';
+import { shopItems, shopItemCategories } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 
-// GET /api/shop-items
-const getAllShopItems = async (req, res) => {
+// Get all shop items with category information
+export const getAllShopItems = async (req, res) => {
   try {
-    const allItems = await db
+    const allShopItems = await db
       .select({
         id: shopItems.id,
         title: shopItems.title,
         description: shopItems.description,
         price: shopItems.price,
+        categoryId: shopItems.categoryId,
         createdAt: shopItems.createdAt,
         updatedAt: shopItems.updatedAt,
+        category: {
+          id: shopItemCategories.id,
+          title: shopItemCategories.title,
+          description: shopItemCategories.description
+        }
       })
-      .from(shopItems);
-
-    // Get categories for each item
-    const itemsWithCategories = await Promise.all(
-      allItems.map(async (item) => {
-        const categories = await db
-          .select({
-            id: shopItemCategories.id,
-            title: shopItemCategories.title,
-            description: shopItemCategories.description,
-          })
-          .from(shopItemCategories)
-          .innerJoin(shopItemsToCategories, eq(shopItemCategories.id, shopItemsToCategories.categoryId))
-          .where(eq(shopItemsToCategories.shopItemId, item.id));
-        
-        return { ...item, categories };
-      })
-    );
-
-    res.json(itemsWithCategories);
+      .from(shopItems)
+      .leftJoin(shopItemCategories, eq(shopItems.categoryId, shopItemCategories.id));
+    
+    // Convert price to number for consistent response
+    const itemsWithNumericPrice = allShopItems.map(item => ({
+      ...item,
+      price: Number(item.price)
+    }));
+    
+    res.json(itemsWithNumericPrice);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch shop items', details: error.message });
+    console.error('Error fetching shop items:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// GET /api/shop-items/:id
-const getShopItemById = async (req, res) => {
+// Get shop item by ID with category information
+export const getShopItemById = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await db.select().from(shopItems).where(eq(shopItems.id, parseInt(id))).limit(1);
+    const shopItem = await db
+      .select({
+        id: shopItems.id,
+        title: shopItems.title,
+        description: shopItems.description,
+        price: shopItems.price,
+        categoryId: shopItems.categoryId,
+        createdAt: shopItems.createdAt,
+        updatedAt: shopItems.updatedAt,
+        category: {
+          id: shopItemCategories.id,
+          title: shopItemCategories.title,
+          description: shopItemCategories.description
+        }
+      })
+      .from(shopItems)
+      .leftJoin(shopItemCategories, eq(shopItems.categoryId, shopItemCategories.id))
+      .where(eq(shopItems.id, parseInt(id)));
     
-    if (item.length === 0) {
+    if (shopItem.length === 0) {
       return res.status(404).json({ error: 'Shop item not found' });
     }
-
-    // Get categories for this item
-    const categories = await db
-      .select({
-        id: shopItemCategories.id,
-        title: shopItemCategories.title,
-        description: shopItemCategories.description,
-      })
-      .from(shopItemCategories)
-      .innerJoin(shopItemsToCategories, eq(shopItemCategories.id, shopItemsToCategories.categoryId))
-      .where(eq(shopItemsToCategories.shopItemId, parseInt(id)));
     
-    res.json({ ...item[0], categories });
+    // Convert price to number for consistent response
+    const itemWithNumericPrice = {
+      ...shopItem[0],
+      price: Number(shopItem[0].price)
+    };
+    
+    res.json(itemWithNumericPrice);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch shop item', details: error.message });
+    console.error('Error fetching shop item:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// POST /api/shop-items
-const createShopItem = async (req, res) => {
+// Create new shop item
+export const createShopItem = async (req, res) => {
   try {
-    const { title, description, price, categoryIds = [] } = req.body;
+    const { title, description, price, categoryId } = req.body;
     
-    if (!title || price === undefined) {
+    if (!title || !price) {
       return res.status(400).json({ error: 'Title and price are required' });
     }
-
-    if (price < 0) {
-      return res.status(400).json({ error: 'Price cannot be negative' });
+    
+    if (price <= 0) {
+      return res.status(400).json({ error: 'Price must be greater than 0' });
     }
     
-    // Create the shop item
-    const newItem = await db.insert(shopItems).values({ title, description, price }).returning();
-    
-    // Link to categories if provided
-    if (categoryIds.length > 0) {
-      const categoryLinks = categoryIds.map(categoryId => ({
-        shopItemId: newItem[0].id,
-        categoryId: parseInt(categoryId)
-      }));
-      
-      await db.insert(shopItemsToCategories).values(categoryLinks);
+    // Validate category exists if provided
+    if (categoryId) {
+      const category = await db.select().from(shopItemCategories).where(eq(shopItemCategories.id, categoryId));
+      if (category.length === 0) {
+        return res.status(400).json({ error: 'Category not found' });
+      }
     }
-
-    // Fetch the created item with categories
-    const categories = await db
-      .select({
-        id: shopItemCategories.id,
-        title: shopItemCategories.title,
-        description: shopItemCategories.description,
-      })
-      .from(shopItemCategories)
-      .innerJoin(shopItemsToCategories, eq(shopItemCategories.id, shopItemsToCategories.categoryId))
-      .where(eq(shopItemsToCategories.shopItemId, newItem[0].id));
     
-    res.status(201).json({ ...newItem[0], categories });
+    const [newShopItem] = await db.insert(shopItems).values({
+      title,
+      description,
+      price: parseFloat(price),
+      categoryId: categoryId ? parseInt(categoryId) : null
+    }).returning();
+    
+    // Convert price to number for consistent response
+    const itemWithNumericPrice = {
+      ...newShopItem,
+      price: Number(newShopItem.price)
+    };
+    
+    res.status(201).json(itemWithNumericPrice);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create shop item', details: error.message });
+    console.error('Error creating shop item:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// PUT /api/shop-items/:id
-const updateShopItem = async (req, res) => {
+// Update shop item
+export const updateShopItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, price, categoryIds = [] } = req.body;
+    const { title, description, price, categoryId } = req.body;
     
-    if (!title || price === undefined) {
+    if (!title || !price) {
       return res.status(400).json({ error: 'Title and price are required' });
     }
-
-    if (price < 0) {
-      return res.status(400).json({ error: 'Price cannot be negative' });
+    
+    if (price <= 0) {
+      return res.status(400).json({ error: 'Price must be greater than 0' });
     }
     
-    // Update the shop item
-    const updatedItem = await db
-      .update(shopItems)
-      .set({ title, description, price, updatedAt: new Date() })
+    // Validate category exists if provided
+    if (categoryId) {
+      const category = await db.select().from(shopItemCategories).where(eq(shopItemCategories.id, categoryId));
+      if (category.length === 0) {
+        return res.status(400).json({ error: 'Category not found' });
+      }
+    }
+    
+    const [updatedShopItem] = await db.update(shopItems)
+      .set({
+        title,
+        description,
+        price: parseFloat(price),
+        categoryId: categoryId ? parseInt(categoryId) : null,
+        updatedAt: new Date()
+      })
       .where(eq(shopItems.id, parseInt(id)))
       .returning();
     
-    if (updatedItem.length === 0) {
+    if (!updatedShopItem) {
       return res.status(404).json({ error: 'Shop item not found' });
     }
-
-    // Update category relationships
-    await db.delete(shopItemsToCategories).where(eq(shopItemsToCategories.shopItemId, parseInt(id)));
     
-    if (categoryIds.length > 0) {
-      const categoryLinks = categoryIds.map(categoryId => ({
-        shopItemId: parseInt(id),
-        categoryId: parseInt(categoryId)
-      }));
-      
-      await db.insert(shopItemsToCategories).values(categoryLinks);
-    }
-
-    // Fetch the updated item with categories
-    const categories = await db
-      .select({
-        id: shopItemCategories.id,
-        title: shopItemCategories.title,
-        description: shopItemCategories.description,
-      })
-      .from(shopItemCategories)
-      .innerJoin(shopItemsToCategories, eq(shopItemCategories.id, shopItemsToCategories.categoryId))
-      .where(eq(shopItemsToCategories.shopItemId, parseInt(id)));
+    // Convert price to number for consistent response
+    const itemWithNumericPrice = {
+      ...updatedShopItem,
+      price: Number(updatedShopItem.price)
+    };
     
-    res.json({ ...updatedItem[0], categories });
+    res.json(itemWithNumericPrice);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update shop item', details: error.message });
+    console.error('Error updating shop item:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// DELETE /api/shop-items/:id
-const deleteShopItem = async (req, res) => {
+// Delete shop item
+export const deleteShopItem = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const deletedItem = await db
-      .delete(shopItems)
+    const [deletedShopItem] = await db.delete(shopItems)
       .where(eq(shopItems.id, parseInt(id)))
       .returning();
     
-    if (deletedItem.length === 0) {
+    if (!deletedShopItem) {
       return res.status(404).json({ error: 'Shop item not found' });
     }
     
-    res.json({ message: 'Shop item deleted successfully', item: deletedItem[0] });
+    res.json({ message: 'Shop item deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete shop item', details: error.message });
+    console.error('Error deleting shop item:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-};
-
-module.exports = {
-  getAllShopItems,
-  getShopItemById,
-  createShopItem,
-  updateShopItem,
-  deleteShopItem,
-};
+}; 

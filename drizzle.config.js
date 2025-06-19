@@ -1,10 +1,13 @@
-const { defineConfig } = require('drizzle-kit');
+import { defineConfig } from 'drizzle-kit';
+import dotenv from 'dotenv';
 
-module.exports = defineConfig({
-  dialect: 'postgresql',
+dotenv.config();
+
+export default defineConfig({
   schema: './src/db/schema.js',
   out: './drizzle',
+  driver: 'pg',
   dbCredentials: {
-    url: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_URL,
   },
-});
+}); 

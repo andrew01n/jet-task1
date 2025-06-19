@@ -1,8 +1,8 @@
-const { pgTable, serial, varchar, text, real, integer, timestamp } = require('drizzle-orm/pg-core');
-const { relations } = require('drizzle-orm');
+import { pgTable, serial, varchar, text, integer, decimal, timestamp } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
 
 // Customer table
-const customers = pgTable('customers', {
+export const customers = pgTable('customers', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
   surname: varchar('surname', { length: 255 }).notNull(),
@@ -12,7 +12,7 @@ const customers = pgTable('customers', {
 });
 
 // ShopItemCategory table
-const shopItemCategories = pgTable('shop_item_categories', {
+export const shopItemCategories = pgTable('shop_item_categories', {
   id: serial('id').primaryKey(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
@@ -21,65 +21,51 @@ const shopItemCategories = pgTable('shop_item_categories', {
 });
 
 // ShopItem table
-const shopItems = pgTable('shop_items', {
+export const shopItems = pgTable('shop_items', {
   id: serial('id').primaryKey(),
   title: varchar('title', { length: 255 }).notNull(),
   description: text('description'),
-  price: real('price').notNull(),
+  price: decimal('price', { precision: 10, scale: 2 }).notNull(),
+  categoryId: integer('category_id').references(() => shopItemCategories.id),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
-
-// Junction table for ShopItem and ShopItemCategory (many-to-many relationship)
-const shopItemsToCategories = pgTable('shop_items_to_categories', {
-  id: serial('id').primaryKey(),
-  shopItemId: integer('shop_item_id').notNull().references(() => shopItems.id, { onDelete: 'cascade' }),
-  categoryId: integer('category_id').notNull().references(() => shopItemCategories.id, { onDelete: 'cascade' }),
 });
 
 // Order table
-const orders = pgTable('orders', {
+export const orders = pgTable('orders', {
   id: serial('id').primaryKey(),
-  customerId: integer('customer_id').notNull().references(() => customers.id, { onDelete: 'cascade' }),
+  customerId: integer('customer_id').references(() => customers.id).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// OrderItem table
-const orderItems = pgTable('order_items', {
+// OrderItem table (junction table for orders and shop items)
+export const orderItems = pgTable('order_items', {
   id: serial('id').primaryKey(),
-  orderId: integer('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
-  shopItemId: integer('shop_item_id').notNull().references(() => shopItems.id, { onDelete: 'cascade' }),
+  orderId: integer('order_id').references(() => orders.id).notNull(),
+  shopItemId: integer('shop_item_id').references(() => shopItems.id).notNull(),
   quantity: integer('quantity').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Define relations
-const customersRelations = relations(customers, ({ many }) => ({
+// Relations
+export const customersRelations = relations(customers, ({ many }) => ({
   orders: many(orders),
 }));
 
-const shopItemCategoriesRelations = relations(shopItemCategories, ({ many }) => ({
-  shopItemsToCategories: many(shopItemsToCategories),
+export const shopItemCategoriesRelations = relations(shopItemCategories, ({ many }) => ({
+  shopItems: many(shopItems),
 }));
 
-const shopItemsRelations = relations(shopItems, ({ many }) => ({
-  shopItemsToCategories: many(shopItemsToCategories),
+export const shopItemsRelations = relations(shopItems, ({ one, many }) => ({
+  category: one(shopItemCategories, {
+    fields: [shopItems.categoryId],
+    references: [shopItemCategories.id],
+  }),
   orderItems: many(orderItems),
 }));
 
-const shopItemsToCategoriesRelations = relations(shopItemsToCategories, ({ one }) => ({
-  shopItem: one(shopItems, {
-    fields: [shopItemsToCategories.shopItemId],
-    references: [shopItems.id],
-  }),
-  category: one(shopItemCategories, {
-    fields: [shopItemsToCategories.categoryId],
-    references: [shopItemCategories.id],
-  }),
-}));
-
-const ordersRelations = relations(orders, ({ one, many }) => ({
+export const ordersRelations = relations(orders, ({ one, many }) => ({
   customer: one(customers, {
     fields: [orders.customerId],
     references: [customers.id],
@@ -87,7 +73,7 @@ const ordersRelations = relations(orders, ({ one, many }) => ({
   orderItems: many(orderItems),
 }));
 
-const orderItemsRelations = relations(orderItems, ({ one }) => ({
+export const orderItemsRelations = relations(orderItems, ({ one }) => ({
   order: one(orders, {
     fields: [orderItems.orderId],
     references: [orders.id],
@@ -96,19 +82,4 @@ const orderItemsRelations = relations(orderItems, ({ one }) => ({
     fields: [orderItems.shopItemId],
     references: [shopItems.id],
   }),
-}));
-
-module.exports = {
-  customers,
-  shopItemCategories,
-  shopItems,
-  shopItemsToCategories,
-  orders,
-  orderItems,
-  customersRelations,
-  shopItemCategoriesRelations,
-  shopItemsRelations,
-  shopItemsToCategoriesRelations,
-  ordersRelations,
-  orderItemsRelations,
-};
+})); 

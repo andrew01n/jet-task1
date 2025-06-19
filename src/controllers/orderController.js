@@ -1,9 +1,9 @@
-const { db } = require('../db');
-const { orders, orderItems, customers, shopItems } = require('../db/schema');
-const { eq } = require('drizzle-orm');
+import { db } from '../db/index.js';
+import { orders, customers, orderItems, shopItems, shopItemCategories } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 
-// GET /api/orders
-const getAllOrders = async (req, res) => {
+// Get all orders with customer and order items information
+export const getAllOrders = async (req, res) => {
   try {
     const allOrders = await db
       .select({
@@ -11,62 +11,56 @@ const getAllOrders = async (req, res) => {
         customerId: orders.customerId,
         createdAt: orders.createdAt,
         updatedAt: orders.updatedAt,
-        customerName: customers.name,
-        customerSurname: customers.surname,
-        customerEmail: customers.email,
+        customer: {
+          id: customers.id,
+          name: customers.name,
+          surname: customers.surname,
+          email: customers.email
+        }
       })
       .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id));
-
+      .leftJoin(customers, eq(orders.customerId, customers.id));
+    
     // Get order items for each order
     const ordersWithItems = await Promise.all(
       allOrders.map(async (order) => {
-        const items = await db
+        const orderItemsData = await db
           .select({
             id: orderItems.id,
             quantity: orderItems.quantity,
-            shopItemId: orderItems.shopItemId,
-            shopItemTitle: shopItems.title,
-            shopItemDescription: shopItems.description,
-            shopItemPrice: shopItems.price,
+            shopItem: {
+              id: shopItems.id,
+              title: shopItems.title,
+              description: shopItems.description,
+              price: shopItems.price,
+              category: {
+                id: shopItemCategories.id,
+                title: shopItemCategories.title,
+                description: shopItemCategories.description
+              }
+            }
           })
           .from(orderItems)
-          .innerJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
+          .leftJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
+          .leftJoin(shopItemCategories, eq(shopItems.categoryId, shopItemCategories.id))
           .where(eq(orderItems.orderId, order.id));
         
         return {
-          id: order.id,
-          customerId: order.customerId,
-          customer: {
-            id: order.customerId,
-            name: order.customerName,
-            surname: order.customerSurname,
-            email: order.customerEmail,
-          },
-          items: items.map(item => ({
-            id: item.id,
-            quantity: item.quantity,
-            shopItem: {
-              id: item.shopItemId,
-              title: item.shopItemTitle,
-              description: item.shopItemDescription,
-              price: item.shopItemPrice,
-            }
-          })),
-          createdAt: order.createdAt,
-          updatedAt: order.updatedAt,
+          ...order,
+          items: orderItemsData
         };
       })
     );
-
+    
     res.json(ordersWithItems);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch orders', details: error.message });
+    console.error('Error fetching orders:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// GET /api/orders/:id
-const getOrderById = async (req, res) => {
+// Get order by ID with customer and order items information
+export const getOrderById = async (req, res) => {
   try {
     const { id } = req.params;
     const order = await db
@@ -75,197 +69,149 @@ const getOrderById = async (req, res) => {
         customerId: orders.customerId,
         createdAt: orders.createdAt,
         updatedAt: orders.updatedAt,
-        customerName: customers.name,
-        customerSurname: customers.surname,
-        customerEmail: customers.email,
+        customer: {
+          id: customers.id,
+          name: customers.name,
+          surname: customers.surname,
+          email: customers.email
+        }
       })
       .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(eq(orders.id, parseInt(id)))
-      .limit(1);
+      .leftJoin(customers, eq(orders.customerId, customers.id))
+      .where(eq(orders.id, parseInt(id)));
     
     if (order.length === 0) {
       return res.status(404).json({ error: 'Order not found' });
     }
-
-    // Get order items
-    const items = await db
+    
+    const orderItemsData = await db
       .select({
         id: orderItems.id,
         quantity: orderItems.quantity,
-        shopItemId: orderItems.shopItemId,
-        shopItemTitle: shopItems.title,
-        shopItemDescription: shopItems.description,
-        shopItemPrice: shopItems.price,
+        shopItem: {
+          id: shopItems.id,
+          title: shopItems.title,
+          description: shopItems.description,
+          price: shopItems.price,
+          category: {
+            id: shopItemCategories.id,
+            title: shopItemCategories.title,
+            description: shopItemCategories.description
+          }
+        }
       })
       .from(orderItems)
-      .innerJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
+      .leftJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
+      .leftJoin(shopItemCategories, eq(shopItems.categoryId, shopItemCategories.id))
       .where(eq(orderItems.orderId, parseInt(id)));
     
     const orderWithItems = {
-      id: order[0].id,
-      customerId: order[0].customerId,
-      customer: {
-        id: order[0].customerId,
-        name: order[0].customerName,
-        surname: order[0].customerSurname,
-        email: order[0].customerEmail,
-      },
-      items: items.map(item => ({
-        id: item.id,
-        quantity: item.quantity,
-        shopItem: {
-          id: item.shopItemId,
-          title: item.shopItemTitle,
-          description: item.shopItemDescription,
-          price: item.shopItemPrice,
-        }
-      })),
-      createdAt: order[0].createdAt,
-      updatedAt: order[0].updatedAt,
+      ...order[0],
+      items: orderItemsData
     };
-
+    
     res.json(orderWithItems);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch order', details: error.message });
+    console.error('Error fetching order:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// POST /api/orders
-const createOrder = async (req, res) => {
+// Create new order
+export const createOrder = async (req, res) => {
   try {
-    const { customerId, items = [] } = req.body;
+    const { customerId, items } = req.body;
     
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID is required' });
+    if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Customer ID and items array are required' });
     }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Order must contain at least one item' });
+    
+    // Validate customer exists
+    const customer = await db.select().from(customers).where(eq(customers.id, customerId));
+    if (customer.length === 0) {
+      return res.status(400).json({ error: 'Customer not found' });
     }
-
-    // Validate items format
+    
+    // Validate all shop items exist
     for (const item of items) {
       if (!item.shopItemId || !item.quantity || item.quantity <= 0) {
-        return res.status(400).json({ error: 'Each item must have shopItemId and positive quantity' });
+        return res.status(400).json({ error: 'Each item must have shopItemId and quantity > 0' });
+      }
+      
+      const shopItem = await db.select().from(shopItems).where(eq(shopItems.id, item.shopItemId));
+      if (shopItem.length === 0) {
+        return res.status(400).json({ error: `Shop item with ID ${item.shopItemId} not found` });
       }
     }
-
-    // Check if customer exists
-    const customer = await db.select().from(customers).where(eq(customers.id, parseInt(customerId))).limit(1);
-    if (customer.length === 0) {
-      return res.status(404).json({ error: 'Customer not found' });
-    }
-
-    // Check if all shop items exist
-    const shopItemIds = items.map(item => item.shopItemId);
-    const existingItems = await db.select().from(shopItems).where(eq(shopItems.id, shopItemIds[0])); // This should use `inArray` for multiple IDs
     
-    // Create the order
-    const newOrder = await db.insert(orders).values({ customerId: parseInt(customerId) }).returning();
+    // Create order
+    const [newOrder] = await db.insert(orders).values({
+      customerId: parseInt(customerId)
+    }).returning();
     
     // Create order items
     const orderItemsData = items.map(item => ({
-      orderId: newOrder[0].id,
+      orderId: newOrder.id,
       shopItemId: parseInt(item.shopItemId),
       quantity: parseInt(item.quantity)
     }));
     
     await db.insert(orderItems).values(orderItemsData);
-
-    // Fetch the created order with all details
-    const createdOrder = await db
-      .select({
-        id: orders.id,
-        customerId: orders.customerId,
-        createdAt: orders.createdAt,
-        updatedAt: orders.updatedAt,
-        customerName: customers.name,
-        customerSurname: customers.surname,
-        customerEmail: customers.email,
-      })
-      .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(eq(orders.id, newOrder[0].id))
-      .limit(1);
-
-    const createdItems = await db
-      .select({
-        id: orderItems.id,
-        quantity: orderItems.quantity,
-        shopItemId: orderItems.shopItemId,
-        shopItemTitle: shopItems.title,
-        shopItemDescription: shopItems.description,
-        shopItemPrice: shopItems.price,
-      })
-      .from(orderItems)
-      .innerJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
-      .where(eq(orderItems.orderId, newOrder[0].id));
     
-    const orderWithItems = {
-      id: createdOrder[0].id,
-      customerId: createdOrder[0].customerId,
-      customer: {
-        id: createdOrder[0].customerId,
-        name: createdOrder[0].customerName,
-        surname: createdOrder[0].customerSurname,
-        email: createdOrder[0].customerEmail,
-      },
-      items: createdItems.map(item => ({
-        id: item.id,
-        quantity: item.quantity,
-        shopItem: {
-          id: item.shopItemId,
-          title: item.shopItemTitle,
-          description: item.shopItemDescription,
-          price: item.shopItemPrice,
-        }
-      })),
-      createdAt: createdOrder[0].createdAt,
-      updatedAt: createdOrder[0].updatedAt,
-    };
-    
-    res.status(201).json(orderWithItems);
+    res.status(201).json(newOrder);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create order', details: error.message });
+    console.error('Error creating order:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// PUT /api/orders/:id
-const updateOrder = async (req, res) => {
+// Update order
+export const updateOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const { customerId, items = [] } = req.body;
+    const { customerId, items } = req.body;
     
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID is required' });
+    if (!customerId || !items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Customer ID and items array are required' });
     }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Order must contain at least one item' });
+    
+    // Validate order exists
+    const existingOrder = await db.select().from(orders).where(eq(orders.id, parseInt(id)));
+    if (existingOrder.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
     }
-
-    // Validate items format
+    
+    // Validate customer exists
+    const customer = await db.select().from(customers).where(eq(customers.id, customerId));
+    if (customer.length === 0) {
+      return res.status(400).json({ error: 'Customer not found' });
+    }
+    
+    // Validate all shop items exist
     for (const item of items) {
       if (!item.shopItemId || !item.quantity || item.quantity <= 0) {
-        return res.status(400).json({ error: 'Each item must have shopItemId and positive quantity' });
+        return res.status(400).json({ error: 'Each item must have shopItemId and quantity > 0' });
+      }
+      
+      const shopItem = await db.select().from(shopItems).where(eq(shopItems.id, item.shopItemId));
+      if (shopItem.length === 0) {
+        return res.status(400).json({ error: `Shop item with ID ${item.shopItemId} not found` });
       }
     }
-
-    // Update the order
-    const updatedOrder = await db
-      .update(orders)
-      .set({ customerId: parseInt(customerId), updatedAt: new Date() })
+    
+    // Update order
+    const [updatedOrder] = await db.update(orders)
+      .set({
+        customerId: parseInt(customerId),
+        updatedAt: new Date()
+      })
       .where(eq(orders.id, parseInt(id)))
       .returning();
     
-    if (updatedOrder.length === 0) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
-
-    // Delete existing order items and create new ones
+    // Delete existing order items
     await db.delete(orderItems).where(eq(orderItems.orderId, parseInt(id)));
     
+    // Create new order items
     const orderItemsData = items.map(item => ({
       orderId: parseInt(id),
       shopItemId: parseInt(item.shopItemId),
@@ -273,89 +219,34 @@ const updateOrder = async (req, res) => {
     }));
     
     await db.insert(orderItems).values(orderItemsData);
-
-    // Fetch the updated order with all details
-    const orderWithDetails = await db
-      .select({
-        id: orders.id,
-        customerId: orders.customerId,
-        createdAt: orders.createdAt,
-        updatedAt: orders.updatedAt,
-        customerName: customers.name,
-        customerSurname: customers.surname,
-        customerEmail: customers.email,
-      })
-      .from(orders)
-      .innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(eq(orders.id, parseInt(id)))
-      .limit(1);
-
-    const updatedItems = await db
-      .select({
-        id: orderItems.id,
-        quantity: orderItems.quantity,
-        shopItemId: orderItems.shopItemId,
-        shopItemTitle: shopItems.title,
-        shopItemDescription: shopItems.description,
-        shopItemPrice: shopItems.price,
-      })
-      .from(orderItems)
-      .innerJoin(shopItems, eq(orderItems.shopItemId, shopItems.id))
-      .where(eq(orderItems.orderId, parseInt(id)));
     
-    const orderWithItems = {
-      id: orderWithDetails[0].id,
-      customerId: orderWithDetails[0].customerId,
-      customer: {
-        id: orderWithDetails[0].customerId,
-        name: orderWithDetails[0].customerName,
-        surname: orderWithDetails[0].customerSurname,
-        email: orderWithDetails[0].customerEmail,
-      },
-      items: updatedItems.map(item => ({
-        id: item.id,
-        quantity: item.quantity,
-        shopItem: {
-          id: item.shopItemId,
-          title: item.shopItemTitle,
-          description: item.shopItemDescription,
-          price: item.shopItemPrice,
-        }
-      })),
-      createdAt: orderWithDetails[0].createdAt,
-      updatedAt: orderWithDetails[0].updatedAt,
-    };
-    
-    res.json(orderWithItems);
+    res.json(updatedOrder);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update order', details: error.message });
+    console.error('Error updating order:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// DELETE /api/orders/:id
-const deleteOrder = async (req, res) => {
+// Delete order
+export const deleteOrder = async (req, res) => {
   try {
     const { id } = req.params;
     
-    const deletedOrder = await db
-      .delete(orders)
+    // Delete order items first (due to foreign key constraint)
+    await db.delete(orderItems).where(eq(orderItems.orderId, parseInt(id)));
+    
+    // Delete order
+    const [deletedOrder] = await db.delete(orders)
       .where(eq(orders.id, parseInt(id)))
       .returning();
     
-    if (deletedOrder.length === 0) {
+    if (!deletedOrder) {
       return res.status(404).json({ error: 'Order not found' });
     }
     
-    res.json({ message: 'Order deleted successfully', order: deletedOrder[0] });
+    res.json({ message: 'Order deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete order', details: error.message });
+    console.error('Error deleting order:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-};
-
-module.exports = {
-  getAllOrders,
-  getOrderById,
-  createOrder,
-  updateOrder,
-  deleteOrder,
-};
+}; 

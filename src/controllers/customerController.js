@@ -1,22 +1,23 @@
-const { db } = require('../db');
-const { customers } = require('../db/schema');
-const { eq } = require('drizzle-orm');
+import { db } from '../db/index.js';
+import { customers } from '../db/schema.js';
+import { eq } from 'drizzle-orm';
 
-// GET /api/customers
-const getAllCustomers = async (req, res) => {
+// Get all customers
+export const getAllCustomers = async (req, res) => {
   try {
     const allCustomers = await db.select().from(customers);
     res.json(allCustomers);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch customers', details: error.message });
+    console.error('Error fetching customers:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// GET /api/customers/:id
-const getCustomerById = async (req, res) => {
+// Get customer by ID
+export const getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
-    const customer = await db.select().from(customers).where(eq(customers.id, parseInt(id))).limit(1);
+    const customer = await db.select().from(customers).where(eq(customers.id, parseInt(id)));
     
     if (customer.length === 0) {
       return res.status(404).json({ error: 'Customer not found' });
@@ -24,12 +25,13 @@ const getCustomerById = async (req, res) => {
     
     res.json(customer[0]);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch customer', details: error.message });
+    console.error('Error fetching customer:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// POST /api/customers
-const createCustomer = async (req, res) => {
+// Create new customer
+export const createCustomer = async (req, res) => {
   try {
     const { name, surname, email } = req.body;
     
@@ -37,18 +39,24 @@ const createCustomer = async (req, res) => {
       return res.status(400).json({ error: 'Name, surname, and email are required' });
     }
     
-    const newCustomer = await db.insert(customers).values({ name, surname, email }).returning();
-    res.status(201).json(newCustomer[0]);
+    const [newCustomer] = await db.insert(customers).values({
+      name,
+      surname,
+      email
+    }).returning();
+    
+    res.status(201).json(newCustomer);
   } catch (error) {
-    if (error.code === '23505') { // Unique constraint violation
-      return res.status(409).json({ error: 'Email already exists' });
+    console.error('Error creating customer:', error);
+    if (error.message.includes('duplicate key')) {
+      return res.status(400).json({ error: 'Email already exists' });
     }
-    res.status(500).json({ error: 'Failed to create customer', details: error.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// PUT /api/customers/:id
-const updateCustomer = async (req, res) => {
+// Update customer
+export const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, surname, email } = req.body;
@@ -57,49 +65,45 @@ const updateCustomer = async (req, res) => {
       return res.status(400).json({ error: 'Name, surname, and email are required' });
     }
     
-    const updatedCustomer = await db
-      .update(customers)
-      .set({ name, surname, email, updatedAt: new Date() })
+    const [updatedCustomer] = await db.update(customers)
+      .set({
+        name,
+        surname,
+        email,
+        updatedAt: new Date()
+      })
       .where(eq(customers.id, parseInt(id)))
       .returning();
     
-    if (updatedCustomer.length === 0) {
+    if (!updatedCustomer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
     
-    res.json(updatedCustomer[0]);
+    res.json(updatedCustomer);
   } catch (error) {
-    if (error.code === '23505') { // Unique constraint violation
-      return res.status(409).json({ error: 'Email already exists' });
+    console.error('Error updating customer:', error);
+    if (error.message.includes('duplicate key')) {
+      return res.status(400).json({ error: 'Email already exists' });
     }
-    res.status(500).json({ error: 'Failed to update customer', details: error.message });
+    res.status(500).json({ error: 'Internal server error' });
   }
 };
 
-// DELETE /api/customers/:id
-const deleteCustomer = async (req, res) => {
+// Delete customer
+export const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const deletedCustomer = await db
-      .delete(customers)
+    const [deletedCustomer] = await db.delete(customers)
       .where(eq(customers.id, parseInt(id)))
       .returning();
     
-    if (deletedCustomer.length === 0) {
+    if (!deletedCustomer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
     
-    res.json({ message: 'Customer deleted successfully', customer: deletedCustomer[0] });
+    res.json({ message: 'Customer deleted successfully' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete customer', details: error.message });
+    console.error('Error deleting customer:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-};
-
-module.exports = {
-  getAllCustomers,
-  getCustomerById,
-  createCustomer,
-  updateCustomer,
-  deleteCustomer,
-};
+}; 

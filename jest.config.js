@@ -1,9 +1,14 @@
-module.exports = {
+export default {
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.js'],
   collectCoverageFrom: [
     'src/**/*.js',
-    '!src/db/seed.js', // Exclude seed file from coverage
+    '!src/index.js',
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
-};
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov', 'html'],
+  transform: {},
+  transformIgnorePatterns: [
+    'node_modules/(?!(drizzle-orm|postgres)/)'
+  ],
+}; 
